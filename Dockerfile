@@ -31,5 +31,5 @@ RUN apt-get update \
 # 构建期就验证，别等部署时才发现
 RUN /app/.venv/bin/python -c "import llama_cpp, diskcache; print('llama_cpp', llama_cpp.__version__)"
 
-LABEL org.opencontainers.image.source="https://github.com/wxxxcxx/openviking-cn" \
+LABEL org.opencontainers.image.source="https://github.com/wxxxcxx/openviking-local-embed" \
       org.opencontainers.image.description="OpenViking + llama-cpp local embedding (bge-small-zh), portable x86-64 build"

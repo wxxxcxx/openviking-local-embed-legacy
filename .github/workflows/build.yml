@@ -8,13 +8,15 @@ on:
       - Dockerfile
       - .github/workflows/build.yml
 
-env:
-  IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-cn
+env: {}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # 注意：secrets 不能写在 workflow 级 env，否则 job 根本不启动
+    env:
+      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
     steps:
       - uses: actions/checkout@v4
 

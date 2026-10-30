@@ -7,7 +7,7 @@
 
 services:
   openviking:
-    image: wxxxcxx/openviking-cn:latest
+    image: wxxxcxx/openviking-local-embed:latest
     container_name: openviking
     restart: unless-stopped
     ports:

@@ -1,4 +1,4 @@
-# openviking-cn
+# openviking-local-embed
 
 OpenViking 的 x86-64 镜像，**带上本地中文 embedding（llama-cpp + bge-small-zh）**，
 不需要额外跑 Ollama 容器。
@@ -21,7 +21,7 @@ OSError: libc.musl-x86_64.so.1: cannot open shared object file
 ## 用法
 
 ```bash
-docker pull 你的用户名/openviking-cn:latest
+docker pull 你的用户名/openviking-local-embed:latest
 ```
 
 `ov.conf` 里只要写本地 embedding，模型首次运行会自动下载到
