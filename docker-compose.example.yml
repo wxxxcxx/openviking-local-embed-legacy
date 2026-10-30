@@ -1,0 +1,27 @@
+# 单容器版：用 GitHub 构建好的镜像，不需要 Ollama
+#
+# 和 docker-compose.yml（两容器 + bge-m3）二选一，不要同时起。
+#
+# 起：  docker compose -f docker-compose.single.yml up -d
+# 切回：docker compose -f docker-compose.single.yml down && docker compose up -d
+
+services:
+  openviking:
+    image: wxxxcxx/openviking-cn:latest
+    container_name: openviking
+    restart: unless-stopped
+    ports:
+      - "1933:1933"
+    env_file:
+      - .env
+    environment:
+      - OPENVIKING_WITH_BOT=0
+    volumes:
+      - ./data-single:/app/.openviking     # 单独的数据目录，切方案时互不污染
+      - ./cache:/app/.cache                # 本地 embedding 模型（46MB）
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:1933/health',timeout=3)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
