@@ -32,8 +32,16 @@ RUN apt-get update \
       --target /app/.venv/lib/python3.13/site-packages \
       diskcache \
  && rm -rf /tmp/wheels \
- && apt-get purge -y --auto-remove build-essential cmake git \
+ && apt-get purge -y build-essential cmake git \
+ && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+
+# libgomp1 是 llama.cpp 的 OpenMP 运行时依赖，apt autoremove 会把它当成
+# build-essential 的依赖一并删掉，导致 import 时 libgomp.so.1 not found
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
 
 # 构建期验证，失败就早点失败
 RUN /app/.venv/bin/python -c "import llama_cpp, diskcache, platform; print('llama_cpp', llama_cpp.__version__, 'on', platform.machine())"
