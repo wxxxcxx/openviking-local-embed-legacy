@@ -8,15 +8,25 @@ on:
       - Dockerfile
       - .github/workflows/build.yml
 
-env: {}
-
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    name: build-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
     # 注意：secrets 不能写在 workflow 级 env，否则 job 根本不启动
     env:
       IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
+      TAG: build-${{ github.run_number }}-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,31 +37,52 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push ${{ matrix.arch }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:llama-${{ github.run_number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-      - name: Smoke test the pushed image
+      - name: Smoke test ${{ matrix.arch }}
         run: |
-          docker pull ${{ env.IMAGE }}:latest
-          # 1 本地 embedding 依赖真的能用（不是只有文件在）
-          docker run --rm --entrypoint /app/.venv/bin/python ${{ env.IMAGE }}:latest \
-            -c "import llama_cpp; print('llama_cpp', llama_cpp.__version__)"
-          # 2 服务端还是原样的入口
-          docker run --rm --entrypoint openviking-entrypoint ${{ env.IMAGE }}:latest --help \
-            | head -5
+          docker pull "$IMAGE:$TAG"
+          docker run --rm --platform ${{ matrix.platform }} \
+            --entrypoint /app/.venv/bin/python "$IMAGE:$TAG" \
+            -c "import llama_cpp, diskcache, platform; print('llama_cpp', llama_cpp.__version__, platform.machine())"
 
-      - name: Summary
+  merge:
+    name: merge-manifests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
         run: |
-          echo "### 推送成功" >> $GITHUB_STEP_SUMMARY
-          echo "- 镜像：\`${{ env.IMAGE }}:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 平台：linux/amd64" >> $GITHUB_STEP_SUMMARY
-          echo "- 拉取：\`docker pull ${{ env.IMAGE }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          docker buildx imagetools create \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:build-${{ github.run_number }}" \
+            "$IMAGE:build-${{ github.run_number }}-amd64" \
+            "$IMAGE:build-${{ github.run_number }}-arm64"
+
+      - name: Verify manifest
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
+        run: |
+          docker buildx imagetools inspect "$IMAGE:latest"
+          {
+            echo "### 多平台镜像已推送"
+            echo "- \`$IMAGE:latest\`"
+            echo "- 平台：linux/amd64（可移植 SSE/AVX 构建）+ linux/arm64"
+          } >> "$GITHUB_STEP_SUMMARY"

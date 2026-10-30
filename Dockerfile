@@ -1,35 +1,42 @@
-# OpenViking 中文镜像（含本地 embedding）
+# OpenViking + 本地 GGUF embedding（llama-cpp-python）
 #
-# 官方镜像不含 llama-cpp-python，而官方提供的预编译轮子是 musl 链接的，
-# 装进这个 Debian 基础镜像会 import 失败（libc.musl-x86_64.so.1 not found）。
-# 所以在构建阶段从源码编译，再把编译工具链删掉。
+# 为什么需要这个镜像：官方镜像不含 llama-cpp-python，而官方预编译轮子在这套
+# Debian 基础镜像上 import 会失败（libc.musl-x86_64.so.1 not found）。
+# 所以构建阶段从源码编译，编完把工具链删掉。
 #
-# 关键编译参数：GGML_NATIVE=OFF
-#   否则在 GitHub runner（支持 AVX2/AVX512）上编出的二进制，
-#   拿到 J5005（只支持 SSE4.2 + AVX）会直接 illegal instruction。
-#   这里按 Gemini Lake 能用的指令集编：AVX 开，AVX2/FMA/F16C 关。
+# 编译参数按架构分流：
+#   amd64  GGML_NATIVE=OFF，只开 AVX，关 AVX2/FMA/F16C
+#          → Gemini Lake（J5005）和老 Xeon 都能跑；开 native 会 illegal instruction
+#   arm64  只关 native，NEON 由 llama.cpp 自己处理
+#
+# 模型：bge-small-zh-v1.5-f16（46MB），首次运行自动下载到 ~/.cache/openviking/models
 
 FROM openviking/openviking:latest
 
 ARG LLAMA_CPP_VERSION=0.3.36
+ARG TARGETARCH
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential cmake git \
- && CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF" \
-    /usr/local/bin/pip wheel --no-deps --wheel-dir /tmp/wheels \
+ && if [ "$TARGETARCH" = "amd64" ]; then \
+      export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF"; \
+    else \
+      export CMAKE_ARGS="-DGGML_NATIVE=OFF"; \
+    fi \
+ && /usr/local/bin/pip wheel --no-deps --wheel-dir /tmp/wheels \
       "llama-cpp-python==${LLAMA_CPP_VERSION}" \
  && /usr/local/bin/pip install --no-deps \
       --target /app/.venv/lib/python3.13/site-packages \
       /tmp/wheels/llama_cpp_python-*.whl \
- && /usr/local/bin/pip install --no-deps \
+ && /usr/local/bin/pip install --no-deps --quiet \
       --target /app/.venv/lib/python3.13/site-packages \
       diskcache \
  && rm -rf /tmp/wheels \
  && apt-get purge -y --auto-remove build-essential cmake git \
  && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
-# 构建期就验证，别等部署时才发现
-RUN /app/.venv/bin/python -c "import llama_cpp, diskcache; print('llama_cpp', llama_cpp.__version__)"
+# 构建期验证，失败就早点失败
+RUN /app/.venv/bin/python -c "import llama_cpp, diskcache, platform; print('llama_cpp', llama_cpp.__version__, 'on', platform.machine())"
 
 LABEL org.opencontainers.image.source="https://github.com/wxxxcxx/openviking-local-embed" \
-      org.opencontainers.image.description="OpenViking + llama-cpp local embedding (bge-small-zh), portable x86-64 build"
+      org.opencontainers.image.description="OpenViking with local llama-cpp embedding (bge-small-zh), portable multi-arch build"
