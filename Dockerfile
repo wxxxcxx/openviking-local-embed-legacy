@@ -1,13 +1,12 @@
 # OpenViking + 本地 GGUF embedding（llama-cpp-python）
 #
-# 为什么需要这个镜像：官方镜像不含 llama-cpp-python，而官方预编译轮子在这套
-# Debian 基础镜像上 import 会失败（libc.musl-x86_64.so.1 not found）。
-# 所以构建阶段从源码编译，编完把工具链删掉。
+# 官方镜像不含 llama-cpp-python，官方预编译轮子链接 musl，在这套 Debian 镜像上
+# import 会失败。所以从源码编译，编完删工具链。
 #
-# 编译参数按架构分流：
-#   amd64  GGML_NATIVE=OFF，只开 AVX，关 AVX2/FMA/F16C
-#          → Gemini Lake（J5005）和老 Xeon 都能跑；开 native 会 illegal instruction
-#   arm64  只关 native，NEON 由 llama.cpp 自己处理
+# 指令集：amd64 必须按 SSE4.2 基线编译。
+#   Pentium Silver J5005（Gemini Lake）只有 SSE4.2 —— 没有 AVX，也没有 AVX2/FMA/F16C。
+#   开 AVX 会在加载模型时 Illegal instruction（实测退出码 132）。
+#   arm64 只需要关掉 native 嗅探，NEON 由 llama.cpp 自己处理。
 #
 # 模型：bge-small-zh-v1.5-f16（46MB），首次运行自动下载到 ~/.cache/openviking/models
 
@@ -19,7 +18,7 @@ ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential cmake git \
  && if [ "$TARGETARCH" = "amd64" ]; then \
-      export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF"; \
+      export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_SSE42=ON"; \
     else \
       export CMAKE_ARGS="-DGGML_NATIVE=OFF"; \
     fi \
@@ -32,19 +31,26 @@ RUN apt-get update \
       --target /app/.venv/lib/python3.13/site-packages \
       diskcache \
  && rm -rf /tmp/wheels \
+ && if [ "$TARGETARCH" = "amd64" ]; then \
+      echo "== 校验二进制里没有 AVX 指令 =="; \
+      for f in /app/.venv/lib/python3.13/site-packages/llama_cpp/lib/*.so*; do \
+        n=$(objdump -d "$f" | grep -c ymm || true); \
+        echo "  $(basename $f) ymm=$n"; \
+        [ "$n" -eq 0 ] || { echo "!! $f 含 AVX 指令，会在老 CPU 上崩溃"; exit 1; }; \
+      done; \
+    fi \
  && apt-get purge -y build-essential cmake git \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
-# libgomp1 是 llama.cpp 的 OpenMP 运行时依赖，apt autoremove 会把它当成
+# libgomp1 是 llama.cpp 的 OpenMP 运行时依赖，autoremove 会把它当成
 # build-essential 的依赖一并删掉，导致 import 时 libgomp.so.1 not found
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libgomp1 \
  && rm -rf /var/lib/apt/lists/*
 
-
 # 构建期验证，失败就早点失败
 RUN /app/.venv/bin/python -c "import llama_cpp, diskcache, platform; print('llama_cpp', llama_cpp.__version__, 'on', platform.machine())"
 
 LABEL org.opencontainers.image.source="https://github.com/wxxxcxx/openviking-local-embed" \
-      org.opencontainers.image.description="OpenViking with local llama-cpp embedding (bge-small-zh), portable multi-arch build"
+      org.opencontainers.image.description="OpenViking with local llama-cpp embedding (bge-small-zh), SSE4.2 baseline for amd64 + arm64"
