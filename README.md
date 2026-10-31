@@ -6,7 +6,7 @@ Pentium Silver J5005（Gemini Lake）。
 
 ```
 镜像    wxxxcxx/openviking-local-embed-legacy:latest
-平台    linux/amd64（SSE4.2 基线）、linux/arm64（NEON）
+平台    只有 linux/amd64（SSE4.2 基线）
 tag     只有 latest，没有其他别名
 ```
 
