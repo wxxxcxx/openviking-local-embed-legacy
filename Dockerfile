@@ -18,7 +18,7 @@ ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential cmake git \
  && if [ "$TARGETARCH" = "amd64" ]; then \
-      export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_SSE42=ON"; \
+      export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_SSE42=ON -DCMAKE_C_FLAGS='-march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 -mno-fma -mno-f16c' -DCMAKE_CXX_FLAGS='-march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 -mno-fma -mno-f16c'"; \
     else \
       export CMAKE_ARGS="-DGGML_NATIVE=OFF"; \
     fi \
@@ -32,11 +32,11 @@ RUN apt-get update \
       diskcache \
  && rm -rf /tmp/wheels \
  && if [ "$TARGETARCH" = "amd64" ]; then \
-      echo "== 校验二进制里没有 AVX 指令 =="; \
+      echo "== 校验二进制里没有 AVX/AVX2/BMI2 指令 =="; \
       for f in /app/.venv/lib/python3.13/site-packages/llama_cpp/lib/*.so*; do \
-        n=$(objdump -d "$f" | grep -c ymm || true); \
-        echo "  $(basename $f) ymm=$n"; \
-        [ "$n" -eq 0 ] || { echo "!! $f 含 AVX 指令，会在老 CPU 上崩溃"; exit 1; }; \
+        n=$(objdump -d "$f" | grep -cE "%ymm|%zmm|vzeroupper|shlx|shrx|sarx" || true); \
+        echo "  $(basename $f) 违规指令=$n"; \
+        [ "$n" -eq 0 ] || { echo "!! $f 含 AVX/BMI2 指令，会在老 CPU 上崩溃"; exit 1; }; \
       done; \
     fi \
  && apt-get purge -y build-essential cmake git \
