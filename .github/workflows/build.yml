@@ -17,15 +17,10 @@ jobs:
       matrix:
         include:
           # 老 CPU（Gemini Lake / J5005 等）：只有 SSE4.2，没有 AVX/AVX2/FMA/F16C/BMI2
-          - tag: sse42-amd64
+          - tag: amd64
             platform: linux/amd64
             runner: ubuntu-latest
             isa: sse42
-          # 现代 CPU：AVX2 + FMA + F16C + BMI2
-          - tag: avx2-amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-            isa: avx2
           - tag: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
@@ -34,7 +29,7 @@ jobs:
     timeout-minutes: 120
     # 注意：secrets 不能写在 workflow 级 env，否则 job 根本不启动
     env:
-      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
+      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed-legacy
     steps:
       - uses: actions/checkout@v4
 
@@ -55,7 +50,6 @@ jobs:
             ISA=${{ matrix.isa }}
           tags: |
             ${{ env.IMAGE }}:${{ matrix.tag }}
-            ${{ env.IMAGE }}:build-${{ github.run_number }}-${{ matrix.tag }}
           cache-from: type=gha,scope=${{ matrix.tag }}
           cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
 
@@ -78,38 +72,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: sse42（amd64 基线 + arm64）→ 同时作为 latest
+      - name: 合成多平台 latest
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed-legacy
         run: |
           docker buildx imagetools create \
-            -t "$IMAGE:sse42" \
-            -t "$IMAGE:build-${{ github.run_number }}-sse42" \
             -t "$IMAGE:latest" \
-            "$IMAGE:sse42-amd64" \
+            "$IMAGE:amd64" \
             "$IMAGE:arm64"
 
-      - name: avx2（仅 amd64）
+      - name: Verify manifest
         env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed-legacy
         run: |
-          docker buildx imagetools create \
-            -t "$IMAGE:avx2" \
-            -t "$IMAGE:build-${{ github.run_number }}-avx2" \
-            "$IMAGE:avx2-amd64"
-
-      - name: Verify manifests
-        env:
-          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
-        run: |
-          for t in sse42 avx2 latest; do
-            echo "--- $t"
-            docker buildx imagetools inspect "$IMAGE:$t" | head -20
-          done
+          docker buildx imagetools inspect "$IMAGE:latest"
           {
-            echo "### 镜像已推送（按指令集分档）"
-            echo "- \`$IMAGE:sse42\` — amd64 SSE4.2 基线 + arm64（老 CPU：Gemini Lake / J5005）"
-            echo "- \`$IMAGE:avx2\` — amd64 AVX2 + FMA + F16C + BMI2（现代 x86，更快）"
-            echo "- \`$IMAGE:arm64\` — 仅 arm64"
-            echo "- \`$IMAGE:latest\` — 等同 sse42（最保险的默认）"
+            echo "### 镜像已推送"
+            echo "- \`$IMAGE:latest\` — linux/amd64（SSE4.2 基线，适配 J5005 这类老 CPU）+ linux/arm64"
+            echo "- 构建期已断言 amd64 二进制不含 AVX/AVX2/BMI2 指令"
           } >> "$GITHUB_STEP_SUMMARY"
