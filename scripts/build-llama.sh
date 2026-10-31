@@ -11,7 +11,7 @@ set -euo pipefail
 if [ "${TARGETARCH:-amd64}" = "amd64" ]; then
   export CFLAGS="-O3 -march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-avx512f -mno-bmi -mno-bmi2 -mno-fma -mno-f16c"
   export CXXFLAGS="$CFLAGS"
-  export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_SSE42=ON"
+  export CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_BMI2=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_AVX512=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_SSE42=ON"
   echo "[build] amd64 基线编译"
 else
   export CMAKE_ARGS="-DGGML_NATIVE=OFF"
