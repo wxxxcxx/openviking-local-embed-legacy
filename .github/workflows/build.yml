@@ -11,23 +11,30 @@ on:
 
 jobs:
   build:
-    name: build-${{ matrix.arch }}
+    name: build-${{ matrix.tag }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
+          # 老 CPU（Gemini Lake / J5005 等）：只有 SSE4.2，没有 AVX/AVX2/FMA/F16C/BMI2
+          - tag: sse42-amd64
             platform: linux/amd64
             runner: ubuntu-latest
-          - arch: arm64
+            isa: sse42
+          # 现代 CPU：AVX2 + FMA + F16C + BMI2
+          - tag: avx2-amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+            isa: avx2
+          - tag: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
+            isa: native
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     # 注意：secrets 不能写在 workflow 级 env，否则 job 根本不启动
     env:
       IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
-      TAG: build-${{ github.run_number }}-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,21 +45,25 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.arch }}
+      - name: Build and push ${{ matrix.tag }}
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.IMAGE }}:${{ env.TAG }}
-          cache-from: type=gha,scope=${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          build-args: |
+            ISA=${{ matrix.isa }}
+          tags: |
+            ${{ env.IMAGE }}:${{ matrix.tag }}
+            ${{ env.IMAGE }}:build-${{ github.run_number }}-${{ matrix.tag }}
+          cache-from: type=gha,scope=${{ matrix.tag }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.tag }}
 
-      - name: Smoke test ${{ matrix.arch }}
+      - name: Smoke test ${{ matrix.tag }}
         run: |
-          docker pull "$IMAGE:$TAG"
+          docker pull "$IMAGE:${{ matrix.tag }}"
           docker run --rm --platform ${{ matrix.platform }} \
-            --entrypoint /app/.venv/bin/python "$IMAGE:$TAG" \
+            --entrypoint /app/.venv/bin/python "$IMAGE:${{ matrix.tag }}" \
             -c "import llama_cpp, diskcache, platform; print('llama_cpp', llama_cpp.__version__, platform.machine())"
 
   merge:
@@ -67,23 +78,38 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create multi-arch manifest
+      - name: sse42（amd64 基线 + arm64）→ 同时作为 latest
         env:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
         run: |
           docker buildx imagetools create \
+            -t "$IMAGE:sse42" \
+            -t "$IMAGE:build-${{ github.run_number }}-sse42" \
             -t "$IMAGE:latest" \
-            -t "$IMAGE:build-${{ github.run_number }}" \
-            "$IMAGE:build-${{ github.run_number }}-amd64" \
-            "$IMAGE:build-${{ github.run_number }}-arm64"
+            "$IMAGE:sse42-amd64" \
+            "$IMAGE:arm64"
 
-      - name: Verify manifest
+      - name: avx2（仅 amd64）
         env:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
         run: |
-          docker buildx imagetools inspect "$IMAGE:latest"
+          docker buildx imagetools create \
+            -t "$IMAGE:avx2" \
+            -t "$IMAGE:build-${{ github.run_number }}-avx2" \
+            "$IMAGE:avx2-amd64"
+
+      - name: Verify manifests
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/openviking-local-embed
+        run: |
+          for t in sse42 avx2 latest; do
+            echo "--- $t"
+            docker buildx imagetools inspect "$IMAGE:$t" | head -20
+          done
           {
-            echo "### 多平台镜像已推送"
-            echo "- \`$IMAGE:latest\`"
-            echo "- 平台：linux/amd64（可移植 SSE/AVX 构建）+ linux/arm64"
+            echo "### 镜像已推送（按指令集分档）"
+            echo "- \`$IMAGE:sse42\` — amd64 SSE4.2 基线 + arm64（老 CPU：Gemini Lake / J5005）"
+            echo "- \`$IMAGE:avx2\` — amd64 AVX2 + FMA + F16C + BMI2（现代 x86，更快）"
+            echo "- \`$IMAGE:arm64\` — 仅 arm64"
+            echo "- \`$IMAGE:latest\` — 等同 sse42（最保险的默认）"
           } >> "$GITHUB_STEP_SUMMARY"
