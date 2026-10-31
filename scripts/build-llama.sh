@@ -18,7 +18,7 @@ else
   echo "[build] ${TARGETARCH:-arm64} 编译"
 fi
 
-echo "[build] CFLAGS=$CFLAGS"
+echo "[build] CFLAGS=${CFLAGS:-<默认>}"
 /usr/local/bin/pip wheel --no-deps --wheel-dir /tmp/wheels "llama-cpp-python==${LLAMA_CPP_VERSION}"
 /usr/local/bin/pip install --no-deps --target /app/.venv/lib/python3.13/site-packages /tmp/wheels/llama_cpp_python-*.whl
 /usr/local/bin/pip install --no-deps --quiet --target /app/.venv/lib/python3.13/site-packages diskcache

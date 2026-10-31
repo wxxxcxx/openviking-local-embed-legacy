@@ -24,7 +24,8 @@ RUN chmod +x /tmp/build-llama.sh && /tmp/build-llama.sh && rm -f /tmp/build-llam
 
 # libgomp1 是 llama.cpp 的 OpenMP 运行时依赖，autoremove 会把它当 build-essential
 # 的依赖一起删掉，导致 import 时 libgomp.so.1 not found
-RUN apt-get purge -y build-essential cmake git \
+RUN apt-get update \
+ && apt-get purge -y build-essential cmake git \
  && apt-get autoremove -y \
  && apt-get install -y --no-install-recommends libgomp1 \
  && rm -rf /var/lib/apt/lists/* /root/.cache/pip
